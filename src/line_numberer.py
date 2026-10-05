@@ -1,14 +1,9 @@
-# JOB 2: Give every distinct line a number (like a roll number).
-# The same line always gets the same number, in both files,
-# so Myers compares small ints instead of long byte strings.
-
-
-def to_ids(lines, book):
+def to_ids(lines, line_to_id):
     ids = []
     for line in lines:
-        line_id = book.get(line)         # seen this line before?
-        if line_id is None:              # no: give it the next new number
-            line_id = len(book)
-            book[line] = line_id
+        line_id = line_to_id.get(line)
+        if line_id is None:
+            line_id = len(line_to_id)
+            line_to_id[line] = line_id
         ids.append(line_id)
     return ids

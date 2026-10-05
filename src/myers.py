@@ -1,87 +1,117 @@
-# JOB 3: Myers' O(ND) algorithm. Works on any sequence whose items can be
-# compared with == : line ids for Part A, characters of a str for Part B.
-# Returns the edit script: a list of KEEP / DELETE / INSERT with the
-# fewest possible DELETE + INSERT.
-
 KEEP = 0
 DELETE = 1
 INSERT = 2
 
 
-def diff(a, b):
-    n, m = len(a), len(b)
+def diff(old_items, new_items):
+    old_length, new_length = len(old_items), len(new_items)
 
-    # Shortcut: equal items at the start and end are always KEEP.
-    pre = 0
-    while pre < n and pre < m and a[pre] == b[pre]:
-        pre += 1
-    suf = 0
-    while suf < n - pre and suf < m - pre and a[n - 1 - suf] == b[m - 1 - suf]:
-        suf += 1
+    prefix_length = 0
+    while (
+        prefix_length < old_length
+        and prefix_length < new_length
+        and old_items[prefix_length] == new_items[prefix_length]
+    ):
+        prefix_length += 1
 
-    middle = _search(a[pre:n - suf], b[pre:m - suf])
-    return [KEEP] * pre + middle + [KEEP] * suf
+    suffix_length = 0
+    while (
+        suffix_length < old_length - prefix_length
+        and suffix_length < new_length - prefix_length
+        and old_items[old_length - 1 - suffix_length] == new_items[new_length - 1 - suffix_length]
+    ):
+        suffix_length += 1
+
+    middle_ops = _shortest_edit_script(
+        old_items[prefix_length:old_length - suffix_length],
+        new_items[prefix_length:new_length - suffix_length],
+    )
+    return [KEEP] * prefix_length + middle_ops + [KEEP] * suffix_length
 
 
-def _search(a, b):
-    n, m = len(a), len(b)
-    max_d = n + m
-    # v[k] = furthest x reached on diagonal k.
-    # Python trick: a negative index counts from the end of the list, so v[-3]
-    # works directly for diagonal k = -3. The list is long enough that the
-    # positive and negative parts never overlap.
-    v = [0] * (2 * max_d + 3)
-    size = len(v)
-    trace = []                            # copy of v[-d..d] after each round d
-    found_d = 0
+def _shortest_edit_script(old_items, new_items):
+    trace, edit_count = _forward_search(old_items, new_items)
+    return _backtrack(trace, edit_count, len(old_items), len(new_items))
 
-    # ---- Forward search: round d = paths that use exactly d edits ----
-    done = False
-    for d in range(max_d + 1):
-        for k in range(-d, d + 1, 2):
-            if k == -d or (k != d and v[k - 1] < v[k + 1]):
-                x = v[k + 1]              # come from diagonal k+1: move down = INSERT
+
+def _came_from_above(furthest_old_index, diagonal, edit_count):
+    return diagonal == -edit_count or (
+        diagonal != edit_count
+        and furthest_old_index[diagonal - 1] < furthest_old_index[diagonal + 1]
+    )
+
+
+def _snapshot(furthest_old_index, edit_count):
+    if edit_count == 0:
+        return furthest_old_index[:1]
+    buffer_size = len(furthest_old_index)
+    return furthest_old_index[:edit_count + 1] + furthest_old_index[buffer_size - edit_count:]
+
+
+def _forward_search(old_items, new_items):
+    old_length, new_length = len(old_items), len(new_items)
+    max_edits = old_length + new_length
+    furthest_old_index = [0] * (2 * max_edits + 3)
+    trace = []
+    final_edit_count = 0
+
+    for edit_count in range(max_edits + 1):
+        reached_end = False
+        for diagonal in range(-edit_count, edit_count + 1, 2):
+            if _came_from_above(furthest_old_index, diagonal, edit_count):
+                old_index = furthest_old_index[diagonal + 1]
             else:
-                x = v[k - 1] + 1          # come from diagonal k-1: move right = DELETE
-            y = x - k
-            # Follow the snake: free diagonal moves while the items are equal
-            while x < n and y < m and a[x] == b[y]:
-                x += 1
-                y += 1
-            v[k] = x
-            if x >= n and y >= m:         # reached the end (n, m) with d edits
-                found_d = d
-                done = True
+                old_index = furthest_old_index[diagonal - 1] + 1
+            new_index = old_index - diagonal
+
+            while (
+                old_index < old_length
+                and new_index < new_length
+                and old_items[old_index] == new_items[new_index]
+            ):
+                old_index += 1
+                new_index += 1
+
+            furthest_old_index[diagonal] = old_index
+            if old_index >= old_length and new_index >= new_length:
+                final_edit_count = edit_count
+                reached_end = True
                 break
-        # Save only diagonals -d..d (2d+1 values), not the whole list.
-        # Stored as [v[0..d], v[-d..-1]] so prev[k] works for negative k too.
-        trace.append(v[:d + 1] + v[size - d:] if d > 0 else v[:1])
-        if done:
+
+        trace.append(_snapshot(furthest_old_index, edit_count))
+        if reached_end:
             break
 
-    # ---- Backtrack: walk from (n, m) back to (0, 0) ----
-    ops = []                              # built backwards, reversed once at the end
-    x, y = n, m
-    for d in range(found_d, 0, -1):
-        prev = trace[d - 1]               # v after round d-1 (diagonals -(d-1)..(d-1))
-        k = x - y
-        if k == -d or (k != d and prev[k - 1] < prev[k + 1]):
-            prev_k = k + 1                # we came down
+    return trace, final_edit_count
+
+
+def _backtrack(trace, edit_count, old_length, new_length):
+    reversed_ops = []
+    old_index, new_index = old_length, new_length
+
+    for current_edits in range(edit_count, 0, -1):
+        previous_round = trace[current_edits - 1]
+        diagonal = old_index - new_index
+
+        if _came_from_above(previous_round, diagonal, current_edits):
+            previous_diagonal = diagonal + 1
         else:
-            prev_k = k - 1                # we came right
-        prev_x = prev[prev_k]
-        prev_y = prev_x - prev_k
+            previous_diagonal = diagonal - 1
+        previous_old_index = previous_round[previous_diagonal]
+        previous_new_index = previous_old_index - previous_diagonal
 
-        while x > prev_x and y > prev_y:  # undo the snake: these were KEEPs
-            ops.append(KEEP)
-            x -= 1
-            y -= 1
-        ops.append(INSERT if prev_k == k + 1 else DELETE)  # the one edit of this round
-        x, y = prev_x, prev_y
-    while x > 0 and y > 0:                # the snake of round 0
-        ops.append(KEEP)
-        x -= 1
-        y -= 1
+        while old_index > previous_old_index and new_index > previous_new_index:
+            reversed_ops.append(KEEP)
+            old_index -= 1
+            new_index -= 1
 
-    ops.reverse()
-    return ops
+        reversed_ops.append(INSERT if previous_diagonal == diagonal + 1 else DELETE)
+        old_index, new_index = previous_old_index, previous_new_index
+
+    while old_index > 0 and new_index > 0:
+        reversed_ops.append(KEEP)
+        old_index -= 1
+        new_index -= 1
+
+    reversed_ops.reverse()
+    return reversed_ops
